@@ -1,0 +1,16 @@
+__pycache__/
+*.py[cod]
+.venv/
+env/
+venv/
+.git
+.gitignore
+logs/
+uploads/
+output/
+node_modules/
+frontend/node_modules/
+frontend/dist/
+.pnpm-store/
+.pnpm-debug.log
+*.log

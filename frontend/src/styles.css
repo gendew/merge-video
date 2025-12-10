@@ -1,0 +1,47 @@
+body {
+  margin: 0;
+  background: radial-gradient(circle at 20% 20%, #f3f8ff, #ffffff 35%), radial-gradient(circle at 80% 0%, #f4f6ff, #ffffff 45%);
+  min-height: 100vh;
+  font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+}
+
+.page {
+  max-width: 1080px;
+  margin: 32px auto 48px;
+  padding: 24px;
+}
+
+.hero {
+  background: linear-gradient(135deg, #1677ff 0%, #5aa3ff 100%);
+  color: #fff;
+  border-radius: 16px;
+  padding: 20px 24px;
+  box-shadow: 0 18px 32px rgba(22, 119, 255, 0.18);
+}
+
+.hero h1 {
+  margin: 0;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+}
+
+.hero p {
+  margin: 6px 0 0;
+  opacity: 0.9;
+}
+
+.card {
+  margin-top: 18px;
+}
+
+.status-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.footer {
+  margin-top: 24px;
+  text-align: center;
+  color: #888;
+}
