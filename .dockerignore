@@ -1,0 +1,12 @@
+.next
+node_modules
+*.log
+logs
+uploads
+output
+tmp
+.git
+.gitignore
+.pnpm-store
+**/node_modules
+**/.DS_Store
