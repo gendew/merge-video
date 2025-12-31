@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   Form,
   Input,
@@ -23,20 +23,19 @@ import {
   CloudUploadOutlined,
   PlayCircleOutlined,
   ReloadOutlined,
-  DownloadOutlined,
+  FolderOpenOutlined,
   ArrowUpOutlined,
   ArrowDownOutlined,
   DeleteOutlined,
 } from '@ant-design/icons';
-import axios from 'axios';
 
 const { Title, Paragraph, Text } = Typography;
 const { Dragger } = Upload;
 
 const MERGE_OPTIONS = [
   { label: 'A: 原始分辨率拼接', value: 'A' },
-  { label: 'B: 缩放到最大分辨率', value: 'B' },
-  { label: 'C: 缩放到第一个视频分辨率', value: 'C' },
+  { label: 'B: 统一到最大分辨率', value: 'B' },
+  { label: 'C: 统一到首个视频分辨率', value: 'C' },
 ];
 
 const VOICE_MIX_OPTIONS = [
@@ -57,121 +56,28 @@ const OUTPUT_FORMATS = [
   { label: 'mkv', value: 'mkv' },
 ];
 
-const API_BASE = '/api';
+const TRIM_MODE_OPTIONS = [
+  { label: '取前 N 秒', value: 'start' },
+  { label: '取后 N 秒', value: 'end' },
+];
+
+// 从 Ant Upload File 对象中提取文件路径（Electron 环境提供 originFileObj.path）
+const getPathFromFile = (file) => file?.originFileObj?.path || file?.path || '';
 
 export default function App() {
   const [form] = Form.useForm();
   const [videos, setVideos] = useState([]);
   const [voiceList, setVoiceList] = useState([]);
   const [tailImage, setTailImage] = useState([]);
-  const [submitting, setSubmitting] = useState(false);
-  const [jobId, setJobId] = useState('');
+  const [running, setRunning] = useState(false);
   const [status, setStatus] = useState('');
   const [outputPath, setOutputPath] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
-  const [downloadUrl, setDownloadUrl] = useState('');
-  const [polling, setPolling] = useState(false);
-
-  const stopPolling = () => setPolling(false);
-
-  useEffect(() => () => stopPolling(), []);
-
-  useEffect(() => {
-    let timer;
-    if (polling && jobId) {
-      const poll = async () => {
-        try {
-          const res = await axios.get(`${API_BASE}/status/${jobId}`);
-          const data = res.data;
-          setStatus(data.status);
-          setOutputPath(data.output_path || '');
-          setErrorMsg(data.error || '');
-          if (data.status === 'done') {
-            setDownloadUrl(`${API_BASE}/result/${jobId}`);
-            stopPolling();
-          } else if (data.status === 'error') {
-            stopPolling();
-          }
-        } catch (err) {
-          console.error(err);
-          stopPolling();
-          message.error('查询状态失败');
-        }
-      };
-      poll();
-      timer = setInterval(poll, 2000);
-    }
-    return () => {
-      if (timer) clearInterval(timer);
-    };
-  }, [polling, jobId]);
-
-  const handleSubmit = async (values) => {
-    if (!videos.length) {
-      message.warning('请至少选择一个视频文件');
-      return;
-    }
-    setSubmitting(true);
-    setStatus('');
-    setErrorMsg('');
-    setDownloadUrl('');
-    try {
-      const fd = new FormData();
-      videos.forEach((item) => {
-        fd.append('files', item.file);
-      });
-      fd.append('trims', JSON.stringify(videos.map((v) => Number(v.trim) || 0)));
-      fd.append('trim_modes', JSON.stringify(videos.map((v) => v.trimMode || 'start')));
-      fd.append('merge_mode', values.merge_mode);
-      fd.append('use_voice', values.use_voice);
-      fd.append('voice_mix_mode', values.voice_mix_mode);
-      fd.append('tts_voice', values.tts_voice);
-      fd.append('output_format', values.output_format);
-      fd.append('output_name', values.output_name || 'web_output');
-      fd.append('tail_duration', Number(values.tail_duration) || 0);
-      if (values.voice_text) {
-        fd.append('voice_text', values.voice_text);
-      }
-      if (voiceList.length) {
-        fd.append('voice_file', voiceList[0].originFileObj);
-      }
-      if (tailImage.length) {
-        fd.append('tail_image', tailImage[0].originFileObj);
-      }
-
-      const res = await axios.post(`${API_BASE}/merge`, fd, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      });
-      const job = res.data.job_id;
-      setJobId(job);
-      setStatus(res.data.status || 'pending');
-      setPolling(true);
-      message.success(`任务已提交：${job}`);
-    } catch (err) {
-      console.error(err);
-      message.error('提交失败，请检查后台日志或网络');
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  const resetForm = () => {
-    form.resetFields();
-    setVideos([]);
-    setVoiceList([]);
-    setTailImage([]);
-    setJobId('');
-    setStatus('');
-    setOutputPath('');
-    setErrorMsg('');
-    setDownloadUrl('');
-    stopPolling();
-  };
+  const [logs, setLogs] = useState('');
 
   const statusTag = useMemo(() => {
     if (!status) return <Tag>未开始</Tag>;
     const map = {
-      pending: <Tag color="default">排队中</Tag>,
       running: <Tag color="processing">运行中</Tag>,
       done: <Tag color="success">完成</Tag>,
       error: <Tag color="error">失败</Tag>,
@@ -221,14 +127,99 @@ export default function App() {
     setVideos((prev) => prev.filter((v) => v.uid !== uid));
   };
 
+  const handleSelectOutput = async () => {
+    const name = form.getFieldValue('output_name') || 'merged_output';
+    const ext = form.getFieldValue('output_format') || 'mp4';
+    const target = await window.desktopApi?.selectOutputPath?.(name, ext);
+    if (target) {
+      setOutputPath(target);
+    }
+  };
+
+  const resetForm = () => {
+    form.resetFields();
+    setVideos([]);
+    setVoiceList([]);
+    setTailImage([]);
+    setStatus('');
+    setOutputPath('');
+    setErrorMsg('');
+    setLogs('');
+  };
+
+  const handleSubmit = async (values) => {
+    if (!window.desktopApi?.runMerge) {
+      message.error('Electron API 未就绪，请通过桌面端运行。');
+      return;
+    }
+    const inputPaths = videos
+      .map((item) => getPathFromFile(item.file))
+      .filter((p) => !!p);
+    if (!inputPaths.length) {
+      message.warning('请至少选择一个本地视频文件。');
+      return;
+    }
+    if (!outputPath) {
+      message.warning('请先选择输出文件路径。');
+      return;
+    }
+
+    setRunning(true);
+    setStatus('running');
+    setErrorMsg('');
+    setLogs('');
+
+    const trims = videos.map((v) => Number(v.trim) || 0);
+    const trimModes = videos.map((v) => v.trimMode || 'start');
+    const voicePath = getPathFromFile(voiceList[0]);
+    const tailImagePath = getPathFromFile(tailImage[0]);
+    const tailDuration = Number(values.tail_duration) || 0;
+
+    const payload = {
+      inputs: inputPaths,
+      outputPath,
+      mergeMode: values.merge_mode,
+      useVoice: values.use_voice,
+      voicePath: voicePath || '',
+      voiceTextContent: values.voice_text || '',
+      voiceMixMode: values.voice_mix_mode,
+      ttsVoice: values.tts_voice,
+      outputFormat: values.output_format,
+      trims,
+      trimModes,
+      tailImagePath: tailImagePath || '',
+      tailDuration,
+    };
+
+    try {
+      const res = await window.desktopApi.runMerge(payload);
+      setLogs([res.stdout, res.stderr].filter(Boolean).join('\n'));
+      if (res.success) {
+        setStatus('done');
+        message.success('合成完成');
+      } else {
+        setStatus('error');
+        setErrorMsg(res.error || '运行失败');
+        message.error('运行失败，请检查日志或路径。');
+      }
+    } catch (err) {
+      console.error(err);
+      setStatus('error');
+      setErrorMsg(err?.message || '运行失败');
+      message.error('运行失败，请查看日志。');
+    } finally {
+      setRunning(false);
+    }
+  };
+
   return (
     <div className="page">
       <div className="hero">
         <Title level={2} style={{ color: '#fff', marginBottom: 4 }}>
-          Video Merge Voiceover · Web
+          Video Merge Voiceover · Desktop
         </Title>
         <Paragraph style={{ color: '#f0f5ff', marginBottom: 0 }}>
-          多视频拼接 + 配音 + TTS，Ant Design 前端，FastAPI 后端，局域网可用。
+          多视频拼接 + 配音 + TTS，本地 Electron 桌面端，直接调用 Python CLI。
         </Paragraph>
       </div>
 
@@ -242,7 +233,7 @@ export default function App() {
             voice_mix_mode: 'B',
             tts_voice: 'A',
             output_format: 'mp4',
-            output_name: 'web_output',
+            output_name: 'desktop_output',
             tail_duration: 0,
           }}
           onFinish={handleSubmit}
@@ -250,7 +241,7 @@ export default function App() {
           <Form.Item
             label="输入视频（可多选，支持拖拽排序）"
             required
-            tooltip="按列表顺序拼接，可设置每段截取前/后 N 秒"
+            tooltip="按列表顺序拼接，可为每段设置截取前/后 N 秒"
           >
             <Dragger
               multiple
@@ -268,7 +259,7 @@ export default function App() {
               <p className="ant-upload-drag-icon">
                 <CloudUploadOutlined />
               </p>
-              <p className="ant-upload-text">点击或拖拽上传视频文件</p>
+              <p className="ant-upload-text">点击或拖拽选择本地视频文件</p>
               <p className="ant-upload-hint">支持 mp4 / mov / mkv</p>
             </Dragger>
 
@@ -276,7 +267,7 @@ export default function App() {
               bordered
               style={{ marginTop: 12 }}
               dataSource={videos}
-              locale={{ emptyText: '已选择的视频将显示在这里，可调整顺序与截取秒数' }}
+              locale={{ emptyText: '已选择的视频将显示在此，可调整顺序与截取秒数' }}
               renderItem={(item, index) => (
                 <List.Item
                   actions={[
@@ -292,11 +283,9 @@ export default function App() {
                       <Select
                         value={item.trimMode || 'start'}
                         style={{ width: 120 }}
-                        options={[
-                          { label: '取前N秒', value: 'start' },
-                          { label: '取后N秒', value: 'end' },
-                        ]}
+                        options={TRIM_MODE_OPTIONS}
                         onChange={(val) => updateTrimMode(item.uid, val)}
+                        optionFilterProp="label"
                       />
                     </Space>,
                     <Button
@@ -339,7 +328,7 @@ export default function App() {
             <Switch />
           </Form.Item>
 
-          <Form.Item label="配音文件（可选）" tooltip="MP3/WAV，若留空且有文本则生成TTS">
+          <Form.Item label="配音文件（可选）" tooltip="MP3/WAV，若留空且有文本则生成 TTS">
             <Upload
               accept="audio/*"
               maxCount={1}
@@ -353,12 +342,12 @@ export default function App() {
 
           <Form.Item label="配音文本（可选，生成 TTS）" name="voice_text">
             <Input.TextArea
-              placeholder="输入文本，留空则不生成TTS"
+              placeholder="输入文本，留空则不生成 TTS"
               autoSize={{ minRows: 3, maxRows: 5 }}
             />
           </Form.Item>
 
-          <Form.Item label="尾帧图片（可选）" tooltip="上传一张图片作为视频结尾停留帧">
+          <Form.Item label="尾帧图片（可选）" tooltip="追加一张图片作为视频结尾帧">
             <Upload
               accept="image/*"
               maxCount={1}
@@ -386,8 +375,17 @@ export default function App() {
             <Select options={OUTPUT_FORMATS} style={{ width: 160 }} />
           </Form.Item>
 
-          <Form.Item label="输出文件名（不含后缀，可自动补全）" name="output_name">
+          <Form.Item label="输出文件名（仅用于默认名称）" name="output_name">
             <Input placeholder="例如 merged_output" />
+          </Form.Item>
+
+          <Form.Item label="输出路径">
+            <Space wrap>
+              <Button icon={<FolderOpenOutlined />} onClick={handleSelectOutput}>
+                选择输出文件
+              </Button>
+              <Text type={outputPath ? 'secondary' : 'danger'}>{outputPath || '未选择'}</Text>
+            </Space>
           </Form.Item>
 
           <Form.Item>
@@ -396,7 +394,7 @@ export default function App() {
                 type="primary"
                 icon={<PlayCircleOutlined />}
                 htmlType="submit"
-                loading={submitting}
+                loading={running}
               >
                 开始合成
               </Button>
@@ -412,14 +410,13 @@ export default function App() {
         <Space className="status-bar" wrap>
           <Text strong>状态：</Text>
           {statusTag}
-          {jobId && <Text type="secondary">Job ID: {jobId}</Text>}
           {outputPath && <Tag color="blue">输出: {outputPath}</Tag>}
-          {downloadUrl && (
-            <Button type="link" icon={<DownloadOutlined />} href={downloadUrl} target="_blank">
-              下载结果
+          {running && <Spin size="small" />}
+          {!running && status === 'done' && outputPath && (
+            <Button type="link" onClick={() => window.desktopApi?.showItemInFolder?.(outputPath)}>
+              打开所在位置
             </Button>
           )}
-          {polling && <Spin size="small" />}
         </Space>
 
         {errorMsg && (
@@ -433,15 +430,26 @@ export default function App() {
         )}
 
         <Divider />
-        <Paragraph type="secondary" style={{ marginBottom: 0 }}>
-          合成完成后，状态会显示为“完成”，点击“下载结果”即可获取输出文件。
+        <Paragraph type="secondary" style={{ marginBottom: 4 }}>
+          日志输出（stdout / stderr）：
         </Paragraph>
+        <pre
+          style={{
+            background: '#0d1117',
+            color: '#e6edf3',
+            padding: 12,
+            borderRadius: 8,
+            minHeight: 120,
+            maxHeight: 260,
+            overflow: 'auto',
+          }}
+        >
+          {logs || '暂无日志'}
+        </pre>
       </Card>
 
       <div className="footer">
-        <Text type="secondary">
-          后端接口：FastAPI · 前端：React + Ant Design · 局域网直连
-        </Text>
+        <Text type="secondary">Electron 桌面端 · 调用本地 Python CLI，所有处理均在本机完成</Text>
       </div>
     </div>
   );

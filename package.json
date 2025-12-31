@@ -1,0 +1,51 @@
+{
+  "name": "video-merge-voiceover-electron",
+  "version": "1.0.0",
+  "description": "Desktop Electron wrapper for the video merge + voiceover CLI",
+  "author": "VideoMergeVoiceover",
+  "private": true,
+  "main": "electron/main.js",
+  "scripts": {
+    "dev": "cross-env ELECTRON=1 concurrently \"pnpm --dir frontend dev\" \"wait-on http://localhost:8100 && electron .\"",
+    "dev:renderer": "cross-env ELECTRON=1 pnpm --dir frontend dev",
+    "build:renderer": "cross-env ELECTRON=1 pnpm --dir frontend build",
+    "build": "pnpm build:renderer && electron-builder",
+    "start": "electron ."
+  },
+  "build": {
+    "appId": "com.example.videomergevoiceover",
+    "productName": "VideoMergeVoiceover",
+    "asar": true,
+    "asarUnpack": [
+      "python-backend/**"
+    ],
+    "files": [
+      "electron/**/*",
+      "frontend/dist/**/*",
+      "python-backend/app.py",
+      "python-backend/merger/**/*",
+      "python-backend/ffmpeg/**/ffmpeg.exe",
+      "python-backend/ffmpeg/**/ffprobe.exe",
+      "python-backend/runtime/**/*",
+      "python-backend/requirements.txt",
+      "package.json"
+    ],
+    "directories": {
+      "buildResources": "build"
+    },
+    "win": {
+      "target": "nsis",
+      "artifactName": "${productName}-Setup-${version}.${ext}",
+      "signingHashAlgorithms": [],
+      "signAndEditExecutable": false
+    }
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2",
+    "cross-env": "^7.0.3",
+    "electron": "^31.0.0",
+    "electron-builder": "^25.1.8",
+    "wait-on": "^7.2.0"
+  },
+  "packageManager": "pnpm@8.9.0"
+}

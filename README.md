@@ -1,138 +1,70 @@
-video_merge_voiceover
-======================
+# 视频拼接与配音 · Electron 桌面版
 
-本地多视频拼接与可选配音工具，提供 CLI 与 Tkinter GUI，支持分辨率自动对齐、音轨混合、TTS 生成、可选输出格式（mp4/mov/mkv）。
+项目定位：**Electron 桌面应用 + 本地 Python CLI**。前端 React + Vite 不变，主进程通过 IPC 调用 `python-backend/app.py`，不再提供任何 Web/HTTP/上传接口；所有文件读写在本机完成，可安全打包为 Windows EXE。当前已放入 ffmpeg（含 bin 目录）与 Python 3.11 便携版。
 
-功能概览
---------
-- 多个视频按顺序拼接，支持三种分辨率策略：  
-  - A：原始分辨率直接拼接（不处理差异）  
-  - B：缩放到所有视频的最大分辨率  
-  - C：缩放到第一个视频的分辨率  
-- 配音可选：加载外部 MP3/WAV，或读取文本文件通过本地 TTS 生成。  
-- 三种音轨混合模式：覆盖 / 混合减半原音量 / 原音轨 + 配音背景。  
-- TTS 三种声音：默认 / 男声 / 女声。  
-- 输出格式可选 mp4、mov、mkv。  
-- 日志：普通日志写入 `logs/app.log`，错误写入 `logs/error.log`。  
-- 自动创建 `output/` 和 `logs/` 目录。
-- 可选裁剪：支持为每个视频设置“仅取前 N 秒”，并可在 Web UI 中拖拽调整合成顺序。
-- Web 服务：基于 FastAPI，可在局域网调用上传/合成/下载。
+## 目录结构
+```
+package.json            # Electron 根包，含开发/打包脚本
+electron/               # 主进程 & 预加载
+  main.js               # 创建窗口、处理 IPC、调用 Python
+  preload.js            # 向渲染进程暴露安全 API
+frontend/               # 现有 React UI（Vite）
+  src/                  # 界面代码，调用 Electron IPC（无 HTTP）
+  vite.config.js        # Electron 场景 base=./
+python-backend/         # Python CLI 入口与业务逻辑
+  app.py                # CLI 入口
+  merger/               # video_merge.py / voiceover.py / utils.py
+  ffmpeg/               # 已放入 ffmpeg，可含 bin/ffmpeg.exe / ffprobe.exe
+  runtime/              # 已放入 Python 3.11 便携版
+  temp/ logs/           # 结构占位，真实写入系统临时目录 & 用户数据目录
+requirements.txt        # Python 依赖
+```
 
-环境准备
---------
-1) 安装依赖：
+## 输入/输出/临时策略
+- 输入：本地已有文件路径，程序仅读取，不复制，不写入安装目录。
+- 输出：必须提供完整绝对路径（Electron 提供“选择输出文件”对话框）；禁止写入安装目录。
+- 临时：统一写入系统临时目录的 `python-backend/temp` 子目录；日志写入用户数据目录（`%LOCALAPPDATA%/python-backend/logs`）。
+
+## 环境准备
+1) Python 依赖：`pip install -r requirements.txt`
+2) Node/Electron：`pnpm install`；`pnpm --dir frontend install`
+3) ffmpeg：已放入 `python-backend/ffmpeg/`。可保留 `bin/ffmpeg.exe`、`bin/ffprobe.exe`，其余如 `doc/`、`presets/` 可按需删除以减小体积（打包默认仅收集 exe）。
+4) Python 3.11 便携版：已放入 `python-backend/runtime/`。可选清理 `Doc/`、`NEWS.txt`、`Tools/` 等文档示例，确保 `python.exe`、DLLs、`Lib/`、`libs/`、`Scripts/` 保留。
+
+## 开发模式（Electron + Vite）
 ```bash
-pip install -r requirements.txt
+# 自动启动 Vite + Electron
+pnpm dev
 ```
-2) 确保本机可用 ffmpeg（moviepy 需要）。可安装系统 ffmpeg 或依赖 `imageio-ffmpeg` 自带的版本。
+- 渲染进程：`pnpm --dir frontend dev`（端口 8100）。
+- 主进程：等待端口就绪后启动 Electron，IPC 直接调用 Python CLI。
 
-项目结构
---------
-```
-video_merge_voiceover/
-├── main.py                  # CLI 入口与核心流程
-├── gui.py                   # Tkinter 图形界面
-├── merger/
-│   ├── __init__.py
-│   ├── video_merge.py       # 视频拼接逻辑
-│   ├── voiceover.py         # 配音/TTS 处理与混合
-│   └── utils.py             # 日志、目录、音频工具
-├── requirements.txt
-└── README.md
-```
-
-CLI 使用
---------
-基本示例（与需求示例保持一致）：
+## 打包发布（Windows）
 ```bash
-python main.py \
-    --inputs video1.mp4 video2.mp4 \
-    --output output/output_video.mp4 \
-    --merge_mode A \
-    --voice None \
-    --use_voice false \
-    --voice_mix_mode B \
-    --tts_voice C \
-    --output_format mp4 \
-    --trim_seconds 5 8   # 可选：与 inputs 对应的裁剪秒数（示例：第1段取前5秒，第2段取前8秒）
+pnpm build:renderer   # 构建前端 dist
+pnpm build            # electron-builder 生成安装包
+```
+产物位于 `dist/`（如 `VideoMergeVoiceover-Setup-1.0.0.exe`）。`package.json` 的 `build.files` 仅打包：
+- Python CLI：`python-backend/app.py`、`merger/`、`requirements.txt`
+- ffmpeg：匹配 `python-backend/ffmpeg/**/ffmpeg.exe` 与 `ffprobe.exe`（无需 doc/presets）
+- Python 运行时：`python-backend/runtime/**/*`
+
+## 渲染端使用
+- 选择本地视频/配音/尾帧图片，配置模式与裁剪；通过“选择输出文件”获取绝对路径。
+- 点击“开始合成”后，主进程调用 Python CLI（无 HTTP），stdout/stderr 回显在页面日志，可打开输出所在位置。
+
+## 纯 CLI（可选）
+```bash
+python python-backend/app.py \
+  --inputs "D:/videos/a.mp4" "D:/videos/b.mp4" \
+  --output "D:/outputs/merged.mp4" \
+  --merge_mode B --use_voice true \
+  --voice "D:/audios/voice.wav" \
+  --voice_mix_mode B --tts_voice C \
+  --output_format mp4
 ```
 
-常用参数说明：
-- `--inputs`：按顺序拼接的输入视频列表。  
-- `--output`：输出文件路径，可不含后缀，程序会按 `--output_format` 补全。  
-- `--merge_mode`：A/B/C，分辨率策略（见上）。  
-- `--use_voice`：true/false，是否启用配音。  
-- `--voice`：外部配音音频路径（MP3/WAV）。  
-- `--voice_text_file`：包含配音文本的文件路径，自动生成 TTS。  
-- `--voice_mix_mode`：A 覆盖 / B 混合原音量减半 / C 原音轨 + 配音背景（30%）。  
-- `--tts_voice`：A 默认 / B 男声 / C 女声。  
-- `--output_format`：mp4、mov、mkv。
-
-GUI 使用
---------
-```bash
-python gui.py
-```
-- “选择视频”：可多选文件。  
-- “启用配音”勾选后，可选配音文件或文本文件生成 TTS。  
-- “拼接模式”“配音混合模式”“TTS 声音”“输出格式”均可选择。  
-- “输出文件名（不含后缀）”用于生成 `output/` 下的文件。  
-- “开始合成”异步执行，不阻塞界面；“打开输出目录”直接打开 `output/`。
-
-Web 服务
---------
-启动（默认 0.0.0.0:8000，可供局域网访问）：
-```bash
-python web_app.py
-```
-接口：
-- `POST /api/merge`：multipart 表单上传，字段  
-  - `files`: 多个视频文件（按顺序）  
-  - `merge_mode`: A/B/C  
-  - `use_voice`: true/false  
-  - `voice_file`: 可选配音文件  
-  - `voice_text`: 可选配音文本（生成 TTS）  
-  - `voice_mix_mode`: A/B/C  
-  - `tts_voice`: A/B/C  
-  - `output_format`: mp4/mov/mkv  
-  - `output_name`: 输出文件名（不含或含后缀均可）  
-- `GET /api/status/{job_id}`：查询任务状态。  
-- `GET /api/result/{job_id}`：下载合成结果。  
-
-简单 cURL 示例：
-```bash
-curl -X POST "http://<host>:8000/api/merge" ^
-  -F "files=@video1.mp4" -F "files=@video2.mp4" ^
-  -F "merge_mode=B" -F "use_voice=true" ^
-  -F "voice_mix_mode=B" -F "tts_voice=C" -F "output_format=mp4" ^
-  -F "voice_text=这是自动生成的配音文本" ^
-  -F "output_name=merged_from_web"
-```
-返回 `job_id` 后，再调用 `/api/status/{job_id}` 查询，完成后用 `/api/result/{job_id}` 下载。
-
-Web UI（React + Ant Design）
----------------------------
-目录：`frontend/`。运行步骤：
-1) 安装依赖  
-```bash
-cd frontend
-npm install
-```
-2) 开发模式（自动代理到后端 8000）：  
-```bash
-npm run dev -- --host
-```
-3) 生产构建：  
-```bash
-npm run build
-```
-构建后会生成 `frontend/dist`，启动后端 `python web_app.py` 即可通过 `http://<host>:8000/web` 访问界面。
-- Web UI 功能：上传多视频、拖拽排序、为每段设置“截取前 N 秒”、可选配音文件或文本生成 TTS、查看任务状态并下载结果。
-
-注意事项
---------
-- 音轨长度不足会自动补齐静音，过长则截断到视频总时长。  
-- 生成的临时音频会在处理结束后清理。  
-- TTS 声线匹配依赖系统可用的声源，若未匹配到对应性别则回退默认声线。  
-- 运行过程中可查看 `logs/app.log` 与 `logs/error.log` 了解详细信息。  
-- 若播放异常，请确认 ffmpeg 可执行文件已在 PATH 中。
+## 常见说明
+- Python 优先使用 `python-backend/runtime/python.exe`，若缺失则回退系统 `python`/`python3`。
+- ffmpeg 优先搜索 `python-backend/ffmpeg/` 内的 `ffmpeg.exe`/`ffprobe.exe`（支持 bin/ 与深层目录）。
+- 安装目录默认只读，输出必须是用户可写的绝对路径。

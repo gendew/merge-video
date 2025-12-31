@@ -12,13 +12,13 @@ ReactDOM.createRoot(document.getElementById('root')).render(
         algorithm: theme.defaultAlgorithm,
         token: {
           colorPrimary: '#1677ff',
-        borderRadius: 8,
-      },
-    }}
-  >
-    <AntApp>
-      <App />
-    </AntApp>
-  </ConfigProvider>
+          borderRadius: 8,
+        },
+      }}
+    >
+      <AntApp>
+        <App />
+      </AntApp>
+    </ConfigProvider>
   </React.StrictMode>
 );
